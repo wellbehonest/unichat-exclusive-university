@@ -74,13 +74,47 @@ export async function reserveMatchmaking(
 }
 
 /**
- * Cancel matchmaking by removing from queue
- * This is done client-side by deleting the RTDB entry
+ * Cancel matchmaking by removing from queue and refunding coin if used
+ * This now calls the Cloud Function to handle refunds securely
  */
 export async function cancelMatchmaking(userId: string): Promise<void> {
   try {
-    await remove(ref(rtdb, `matchmakingQueue/${userId}`));
-    console.log('✅ Successfully cancelled matchmaking');
+    // Get auth token
+    const user = auth.currentUser;
+    if (!user) {
+      throw new Error('User not authenticated');
+    }
+    
+    const idToken = await user.getIdToken();
+    
+    // Call Cloud Function to cancel and refund
+    const response = await fetch(
+      'https://us-central1-chattingmap-c97b0.cloudfunctions.net/cancelMatch',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          data: {},
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to cancel matchmaking');
+    }
+
+    const responseData = await response.json();
+    const result = responseData.result;
+    
+    if (result.refunded) {
+      console.log('✅ Matchmaking cancelled and coin refunded');
+    } else {
+      console.log('✅ Matchmaking cancelled');
+    }
   } catch (error) {
     console.error('❌ Error cancelling matchmaking:', error);
     throw error;

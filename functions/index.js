@@ -28,9 +28,11 @@ setGlobalOptions({maxInstances: 10});
 // Export Cloud Functions
 const {reserveMatch} = require("./src/reserveMatch");
 const {matchmaker} = require("./src/matchmaker");
+const {cancelMatch} = require("./src/cancelMatch");
 
 exports.reserveMatch = reserveMatch;
 exports.matchmaker = matchmaker;
+exports.cancelMatch = cancelMatch;
 
 // Create and deploy your first functions
 // https://firebase.google.com/docs/functions/get-started
