@@ -1,0 +1,991 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { useAuth } from '../App';
+import { useNavigate } from 'react-router-dom';
+import { collection, query, where, onSnapshot, doc, updateDoc, getDocs, orderBy, serverTimestamp, addDoc, Timestamp } from 'firebase/firestore';
+import { auth, db } from '../services/firebase';
+import { UserProfile, Chat, Message, ChatParticipantInfo, Report, AdminLog, BanDuration } from '../types';
+import { signOut } from 'firebase/auth';
+import { Shield, Users, MessageSquare, BarChart2, UserCheck, UserX, Clock, Search, LogOut, Eye, Flag, AlertTriangle, CheckCircle, XCircle, User, Filter, Calendar, Download, Edit, FileText, TrendingUp, CheckSquare, Square } from 'lucide-react';
+import { LineChart, Line, BarChart as RechartsBarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+
+type AdminView = 'dashboard' | 'approvals' | 'users' | 'chats' | 'reports' | 'analytics' | 'logs';
+
+// --- Confirmation Modal ---
+const ConfirmationModal: React.FC<{ 
+    title: string; 
+    message: string; 
+    confirmText: string;
+    cancelText?: string;
+    onConfirm: () => void; 
+    onCancel: () => void;
+    isDangerous?: boolean;
+}> = ({ title, message, confirmText, cancelText = 'Cancel', onConfirm, onCancel, isDangerous = false }) => {
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50 p-4">
+            <div className="bg-dark-card rounded-2xl shadow-2xl max-w-md w-full border-2 border-dark-surface">
+                <div className="p-6">
+                    <div className="flex items-center justify-center mb-4">
+                        <div className={`w-16 h-16 ${isDangerous ? 'bg-red-500/20' : 'bg-yellow-500/20'} rounded-full flex items-center justify-center`}>
+                            <AlertTriangle className={isDangerous ? 'text-red-500' : 'text-yellow-500'} size={32} />
+                        </div>
+                    </div>
+                    <h2 className="text-2xl font-bold text-center text-white mb-4">{title}</h2>
+                    <p className="text-dark-text-secondary text-center leading-relaxed mb-6">{message}</p>
+                    <div className="flex space-x-3">
+                        <button 
+                            onClick={onCancel}
+                            className="flex-1 bg-dark-surface hover:bg-dark-bg text-white font-bold py-3 px-4 rounded-lg transition-colors"
+                        >
+                            {cancelText}
+                        </button>
+                        <button 
+                            onClick={onConfirm}
+                            className={`flex-1 ${isDangerous ? 'bg-red-600 hover:bg-red-700' : 'bg-yellow-600 hover:bg-yellow-700'} text-white font-bold py-3 px-4 rounded-lg transition-colors`}
+                        >
+                            {confirmText}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+// --- User Details Modal ---
+const UserDetailsModal: React.FC<{
+    user: UserProfile;
+    reports: Report[];
+    onClose: () => void;
+    onSave: (userId: string, updates: Partial<UserProfile>) => void;
+}> = ({ user, reports, onClose, onSave }) => {
+    const [isEditing, setIsEditing] = useState(false);
+    const [editedUser, setEditedUser] = useState(user);
+    
+    const userReports = reports.filter(r => r.reportedUser === user.uid || r.reportedBy === user.uid);
+    const reportedCount = reports.filter(r => r.reportedUser === user.uid).length;
+    const reporterCount = reports.filter(r => r.reportedBy === user.uid).length;
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50 p-4 overflow-y-auto">
+            <div className="bg-dark-card rounded-2xl shadow-2xl max-w-4xl w-full border-2 border-dark-surface my-8">
+                <div className="p-6 border-b border-dark-surface flex justify-between items-center">
+                    <h2 className="text-2xl font-bold text-white flex items-center">
+                        <User className="mr-2" />
+                        User Details
+                    </h2>
+                    <button onClick={onClose} className="text-dark-text-secondary hover:text-white">
+                        <XCircle size={24} />
+                    </button>
+                </div>
+                
+                <div className="p-6 max-h-[70vh] overflow-y-auto">
+                    {/* Profile Section */}
+                    <div className="bg-dark-surface p-4 rounded-lg mb-4">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="font-bold text-lg">Profile Information</h3>
+                            <button
+                                onClick={() => setIsEditing(!isEditing)}
+                                className="bg-brand-primary hover:bg-brand-secondary text-white px-3 py-1 rounded-lg text-sm flex items-center"
+                            >
+                                <Edit size={14} className="mr-1" />
+                                {isEditing ? 'Cancel' : 'Edit'}
+                            </button>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="text-xs text-dark-text-secondary">Username</label>
+                                {isEditing ? (
+                                    <input
+                                        type="text"
+                                        value={editedUser.username}
+                                        onChange={e => setEditedUser({...editedUser, username: e.target.value})}
+                                        className="w-full bg-dark-bg p-2 rounded-lg border border-dark-surface mt-1"
+                                    />
+                                ) : (
+                                    <p className="text-white font-semibold">{user.username}</p>
+                                )}
+                            </div>
+                            <div>
+                                <label className="text-xs text-dark-text-secondary">Email</label>
+                                {isEditing ? (
+                                    <input
+                                        type="email"
+                                        value={editedUser.email}
+                                        onChange={e => setEditedUser({...editedUser, email: e.target.value})}
+                                        className="w-full bg-dark-bg p-2 rounded-lg border border-dark-surface mt-1"
+                                    />
+                                ) : (
+                                    <p className="text-white font-semibold">{user.email}</p>
+                                )}
+                            </div>
+                            <div>
+                                <label className="text-xs text-dark-text-secondary">Admission Number</label>
+                                {isEditing ? (
+                                    <input
+                                        type="text"
+                                        value={editedUser.admissionNumber}
+                                        onChange={e => setEditedUser({...editedUser, admissionNumber: e.target.value})}
+                                        className="w-full bg-dark-bg p-2 rounded-lg border border-dark-surface mt-1"
+                                    />
+                                ) : (
+                                    <p className="text-white font-semibold">{user.admissionNumber}</p>
+                                )}
+                            </div>
+                            <div>
+                                <label className="text-xs text-dark-text-secondary">Gender</label>
+                                {isEditing ? (
+                                    <select
+                                        value={editedUser.gender}
+                                        onChange={e => setEditedUser({...editedUser, gender: e.target.value as 'male' | 'female' | 'other'})}
+                                        className="w-full bg-dark-bg p-2 rounded-lg border border-dark-surface mt-1"
+                                    >
+                                        <option value="male">Male</option>
+                                        <option value="female">Female</option>
+                                        <option value="other">Other</option>
+                                    </select>
+                                ) : (
+                                    <p className="text-white font-semibold capitalize">{user.gender}</p>
+                                )}
+                            </div>
+                            <div>
+                                <label className="text-xs text-dark-text-secondary">Status</label>
+                                <p className={`font-semibold ${user.status === 'approved' ? 'text-green-400' : user.status === 'banned' ? 'text-red-400' : 'text-yellow-400'}`}>
+                                    {user.status.toUpperCase()}
+                                </p>
+                            </div>
+                            <div>
+                                <label className="text-xs text-dark-text-secondary">Ads Watched</label>
+                                {isEditing ? (
+                                    <input
+                                        type="number"
+                                        value={editedUser.adsWatched}
+                                        onChange={e => setEditedUser({...editedUser, adsWatched: parseInt(e.target.value)})}
+                                        className="w-full bg-dark-bg p-2 rounded-lg border border-dark-surface mt-1"
+                                    />
+                                ) : (
+                                    <p className="text-white font-semibold">{user.adsWatched}</p>
+                                )}
+                            </div>
+                        </div>
+                        
+                        <div className="mt-4">
+                            <label className="text-xs text-dark-text-secondary">Bio</label>
+                            {isEditing ? (
+                                <textarea
+                                    value={editedUser.bio || ''}
+                                    onChange={e => setEditedUser({...editedUser, bio: e.target.value})}
+                                    className="w-full bg-dark-bg p-2 rounded-lg border border-dark-surface mt-1"
+                                    rows={3}
+                                />
+                            ) : (
+                                <p className="text-white">{user.bio || 'No bio'}</p>
+                            )}
+                        </div>
+                        
+                        {isEditing && (
+                            <button
+                                onClick={() => {
+                                    onSave(user.uid, editedUser);
+                                    setIsEditing(false);
+                                }}
+                                className="mt-4 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg"
+                            >
+                                Save Changes
+                            </button>
+                        )}
+                    </div>
+
+                    {/* Stats Section */}
+                    <div className="grid grid-cols-3 gap-4 mb-4">
+                        <div className="bg-red-500/10 border border-red-500/30 p-4 rounded-lg">
+                            <p className="text-xs text-red-400">Reported</p>
+                            <p className="text-2xl font-bold text-white">{reportedCount}</p>
+                        </div>
+                        <div className="bg-yellow-500/10 border border-yellow-500/30 p-4 rounded-lg">
+                            <p className="text-xs text-yellow-400">Reports Filed</p>
+                            <p className="text-2xl font-bold text-white">{reporterCount}</p>
+                        </div>
+                        <div className="bg-orange-500/10 border border-orange-500/30 p-4 rounded-lg">
+                            <p className="text-xs text-orange-400">Warnings</p>
+                            <p className="text-2xl font-bold text-white">{user.warnings || 0}</p>
+                        </div>
+                    </div>
+
+                    {/* Reports Involving User */}
+                    <div className="bg-dark-surface p-4 rounded-lg">
+                        <h3 className="font-bold text-lg mb-3 flex items-center">
+                            <Flag className="mr-2 text-red-500" />
+                            Reports Involving This User ({userReports.length})
+                        </h3>
+                        {userReports.length > 0 ? (
+                            <div className="space-y-2 max-h-60 overflow-y-auto">
+                                {userReports.map(report => (
+                                    <div key={report.id} className="bg-dark-bg p-3 rounded-lg border border-dark-surface">
+                                        <div className="flex justify-between items-start mb-2">
+                                            <div>
+                                                <p className="text-sm">
+                                                    {report.reportedUser === user.uid ? (
+                                                        <span className="text-red-400 font-semibold">Reported by {report.reportedByName}</span>
+                                                    ) : (
+                                                        <span className="text-yellow-400 font-semibold">Filed against {report.reportedUserName}</span>
+                                                    )}
+                                                </p>
+                                                <p className="text-xs text-dark-text-secondary">
+                                                    {new Date(report.timestamp.seconds * 1000).toLocaleString()}
+                                                </p>
+                                            </div>
+                                            <span className={`text-xs px-2 py-1 rounded-full ${
+                                                report.status === 'pending' ? 'bg-yellow-500/20 text-yellow-400' : 
+                                                report.status === 'reviewed' ? 'bg-green-500/20 text-green-400' : 
+                                                'bg-gray-500/20 text-gray-400'
+                                            }`}>
+                                                {report.status}
+                                            </span>
+                                        </div>
+                                        <p className="text-sm text-red-400">{report.reason}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <p className="text-dark-text-secondary text-center py-4">No reports found</p>
+                        )}
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+// --- Dashboard Stats Card ---
+const StatCard: React.FC<{ title: string; value: string | number; icon: React.ReactNode }> = ({ title, value, icon }) => (
+    <div className="bg-dark-card p-6 rounded-2xl border border-dark-surface flex items-center space-x-4">
+        <div className="bg-brand-primary/20 p-3 rounded-full">{icon}</div>
+        <div>
+            <p className="text-dark-text-secondary text-sm">{title}</p>
+            <p className="text-2xl font-bold text-white">{value}</p>
+        </div>
+    </div>
+);
+
+
+// --- Main Admin Component ---
+const AdminPage: React.FC = () => {
+    const { userProfile, loading } = useAuth();
+    const navigate = useNavigate();
+    const [view, setView] = useState<AdminView>('dashboard');
+    
+    console.log('AdminPage render:', { 
+        userProfile, 
+        isAdmin: userProfile?.isAdmin, 
+        loading,
+        username: userProfile?.username,
+        status: userProfile?.status 
+    });
+    
+    const [users, setUsers] = useState<UserProfile[]>([]);
+    const [chats, setChats] = useState<Chat[]>([]);
+    const [reports, setReports] = useState<Report[]>([]);
+    const [adminLogs, setAdminLogs] = useState<AdminLog[]>([]);
+    const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
+    const [selectedReport, setSelectedReport] = useState<Report | null>(null);
+    const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
+    const [chatMessages, setChatMessages] = useState<Message[]>([]);
+    const [searchTerm, setSearchTerm] = useState('');
+    
+    // Bulk action states
+    const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
+    const [selectedReportIds, setSelectedReportIds] = useState<string[]>([]);
+    
+    // Filter states
+    const [reportStatusFilter, setReportStatusFilter] = useState<'all' | 'pending' | 'reviewed' | 'dismissed'>('all');
+    const [reportDateFilter, setReportDateFilter] = useState<'all' | 'today' | 'week' | 'month'>('all');
+    const [userStatusFilter, setUserStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected' | 'banned'>('all');
+    
+    // Ban duration state
+    const [banDuration, setBanDuration] = useState<BanDuration>('permanent');
+    
+    const [confirmAction, setConfirmAction] = useState<{
+        show: boolean;
+        title: string;
+        message: string;
+        confirmText: string;
+        isDangerous: boolean;
+        onConfirm: () => void;
+    } | null>(null);
+
+    // Activity logging function
+    const logAdminAction = async (
+        action: AdminLog['action'],
+        details: string,
+        targetUserId?: string,
+        targetUserName?: string,
+        metadata?: AdminLog['metadata']
+    ) => {
+        if (!userProfile) return;
+        
+        try {
+            await addDoc(collection(db, 'adminLogs'), {
+                adminId: userProfile.uid,
+                adminName: userProfile.username,
+                action,
+                targetUserId,
+                targetUserName,
+                details,
+                timestamp: serverTimestamp(),
+                metadata: metadata || {}
+            });
+        } catch (error) {
+            console.error('Error logging admin action:', error);
+        }
+    };
+
+    useEffect(() => {
+        const usersQuery = query(collection(db, 'users'));
+        const chatsQuery = query(collection(db, 'chats'));
+        const reportsQuery = query(collection(db, 'reports'), orderBy('timestamp', 'desc'));
+        const logsQuery = query(collection(db, 'adminLogs'), orderBy('timestamp', 'desc'));
+        
+        const unsubUsers = onSnapshot(usersQuery, snapshot => {
+            setUsers(snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as UserProfile)));
+        });
+
+        const unsubChats = onSnapshot(chatsQuery, snapshot => {
+            setChats(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Chat)));
+        });
+
+        const unsubReports = onSnapshot(reportsQuery, snapshot => {
+            setReports(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Report)));
+        });
+
+        const unsubLogs = onSnapshot(logsQuery, snapshot => {
+            setAdminLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AdminLog)));
+        });
+
+        return () => {
+            unsubUsers();
+            unsubChats();
+            unsubReports();
+            unsubLogs();
+        };
+    }, []);
+
+    useEffect(() => {
+        if (!selectedChat) {
+            setChatMessages([]);
+            return;
+        }
+        const messagesQuery = query(collection(db, `chats/${selectedChat.id}/messages`), orderBy('timestamp', 'asc'));
+        const unsubMessages = onSnapshot(messagesQuery, snapshot => {
+            setChatMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Message)));
+        });
+
+        return () => unsubMessages();
+    }, [selectedChat]);
+
+
+    const handleUserStatusChange = async (uid: string, status: 'approved' | 'rejected' | 'banned', duration?: BanDuration) => {
+        const user = users.find(u => u.uid === uid);
+        if (!user) return;
+        
+        const updates: Partial<UserProfile> = { status };
+        
+        if (status === 'banned' && duration) {
+            const banExpiresAt = duration === 'permanent' ? null : 
+                duration === '1day' ? new Date(Date.now() + 24 * 60 * 60 * 1000) :
+                duration === '7days' ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) :
+                new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+            
+            (updates as any).banExpiresAt = banExpiresAt ? Timestamp.fromDate(banExpiresAt) : null;
+            (updates as any).banReason = 'Banned by admin';
+            updates.warningMessage = duration === 'permanent' 
+                ? 'Your account has been permanently banned.' 
+                : `Your account has been banned until ${banExpiresAt?.toLocaleDateString()}.`;
+            (updates as any).warningTimestamp = serverTimestamp();
+        }
+        
+        await updateDoc(doc(db, 'users', uid), updates);
+        
+        await logAdminAction(
+            status === 'approved' ? 'approved' : status === 'rejected' ? 'rejected' : 'banned',
+            `${status === 'approved' ? 'Approved' : status === 'rejected' ? 'Rejected' : 'Banned'} user ${user.username}`,
+            uid,
+            user.username,
+            status === 'banned' ? { banDuration: duration } : undefined
+        );
+    };
+    
+    // Bulk approve users
+    const handleBulkApprove = async () => {
+        setConfirmAction({
+            show: true,
+            title: 'Bulk Approve Users',
+            message: `Are you sure you want to approve ${selectedUserIds.length} users?`,
+            confirmText: 'Approve All',
+            isDangerous: false,
+            onConfirm: async () => {
+                for (const uid of selectedUserIds) {
+                    await handleUserStatusChange(uid, 'approved');
+                }
+                await logAdminAction('bulk_action', `Bulk approved ${selectedUserIds.length} users`, undefined, undefined, { bulkCount: selectedUserIds.length });
+                setSelectedUserIds([]);
+                setConfirmAction(null);
+            }
+        });
+    };
+    
+    // Bulk ban users
+    const handleBulkBan = async () => {
+        setConfirmAction({
+            show: true,
+            title: 'Bulk Ban Users',
+            message: `Are you sure you want to ban ${selectedUserIds.length} users?`,
+            confirmText: 'Ban All',
+            isDangerous: true,
+            onConfirm: async () => {
+                for (const uid of selectedUserIds) {
+                    await handleUserStatusChange(uid, 'banned', banDuration);
+                }
+                await logAdminAction('bulk_action', `Bulk banned ${selectedUserIds.length} users`, undefined, undefined, { bulkCount: selectedUserIds.length, banDuration });
+                setSelectedUserIds([]);
+                setConfirmAction(null);
+            }
+        });
+    };
+    
+    // Bulk mark reports as reviewed
+    const handleBulkReviewReports = async () => {
+        setConfirmAction({
+            show: true,
+            title: 'Bulk Review Reports',
+            message: `Mark ${selectedReportIds.length} reports as reviewed?`,
+            confirmText: 'Mark Reviewed',
+            isDangerous: false,
+            onConfirm: async () => {
+                for (const reportId of selectedReportIds) {
+                    await updateDoc(doc(db, 'reports', reportId), { status: 'reviewed' });
+                }
+                await logAdminAction('bulk_action', `Bulk reviewed ${selectedReportIds.length} reports`, undefined, undefined, { bulkCount: selectedReportIds.length });
+                setSelectedReportIds([]);
+                setConfirmAction(null);
+            }
+        });
+    };
+    
+    // Toggle user selection
+    const toggleUserSelection = (uid: string) => {
+        setSelectedUserIds(prev => 
+            prev.includes(uid) ? prev.filter(id => id !== uid) : [...prev, uid]
+        );
+    };
+    
+    // Toggle report selection
+    const toggleReportSelection = (reportId: string) => {
+        setSelectedReportIds(prev => 
+            prev.includes(reportId) ? prev.filter(id => id !== reportId) : [...prev, reportId]
+        );
+    };
+    
+    // Save user details
+    const handleSaveUserDetails = async (userId: string, updates: Partial<UserProfile>) => {
+        try {
+            await updateDoc(doc(db, 'users', userId), updates);
+            await logAdminAction('profile_edited', `Edited profile for ${updates.username}`, userId, updates.username, { changes: updates });
+            setSelectedUser(null);
+            alert('User details updated successfully!');
+        } catch (error) {
+            console.error('Error updating user:', error);
+            alert('Failed to update user details');
+        }
+    };
+
+    const handleEndChat = async (chatId: string) => {
+        // This is a simplified version. A robust implementation would use a Cloud Function
+        // to delete subcollections and update all users.
+        const chatDoc = doc(db, 'chats', chatId);
+        const chatSnapshot = await getDocs(query(collection(db, `chats/${chatId}/messages`)));
+        chatSnapshot.forEach(async (messageDoc) => {
+           // await deleteDoc(messageDoc.ref); // Not deleting messages for simplicity
+        });
+        // await deleteDoc(chatDoc);
+        alert("Chat end functionality would delete the chat document. Disabled for this demo.");
+
+    };
+
+    const handleReportAction = async (reportId: string, status: 'reviewed' | 'dismissed') => {
+        try {
+            await updateDoc(doc(db, 'reports', reportId), { status });
+            setSelectedReport(null);
+        } catch (error) {
+            console.error('Error updating report:', error);
+            alert('Failed to update report status.');
+        }
+    };
+
+    const handleUserAction = async (userId: string, action: 'warning' | 'ban', reportId: string, userName: string) => {
+        const confirmTitle = action === 'ban' ? 'Ban User' : 'Warn User';
+        const confirmMessage = action === 'ban' 
+            ? `Are you sure you want to BAN ${userName}? They will not be able to access the chat anymore.`
+            : `Are you sure you want to WARN ${userName}? They will see a warning popup immediately on their screen (if they're currently logged in) or as soon as they log in next time.`;
+        
+        setConfirmAction({
+            show: true,
+            title: confirmTitle,
+            message: confirmMessage,
+            confirmText: action === 'ban' ? 'Ban User' : 'Warn User',
+            isDangerous: action === 'ban',
+            onConfirm: async () => {
+                try {
+                    console.log(`Taking action: ${action} on user ${userId} (${userName})`);
+                    const userRef = doc(db, 'users', userId);
+                    
+                    if (action === 'ban') {
+                        // Ban the user
+                        console.log('Banning user...');
+                        await updateDoc(userRef, { 
+                            status: 'banned',
+                            currentChatId: null,
+                            warningMessage: 'Your account has been banned due to violation of community guidelines.',
+                            warningTimestamp: serverTimestamp()
+                        });
+                        console.log('User banned successfully');
+                    } else {
+                        // Give warning
+                        const user = users.find(u => u.uid === userId);
+                        const currentWarnings = (user?.warnings || 0) + 1;
+                        
+                        console.log(`Giving warning ${currentWarnings} to user...`);
+                        await updateDoc(userRef, { 
+                            warnings: currentWarnings,
+                            warningMessage: `Warning ${currentWarnings}: You have received a warning from the admin. Please follow community guidelines. Multiple warnings may result in a ban.`,
+                            warningTimestamp: serverTimestamp()
+                        });
+                        console.log('Warning sent successfully');
+                    }
+
+                    // Mark report as reviewed
+                    console.log('Marking report as reviewed...');
+                    await updateDoc(doc(db, 'reports', reportId), { status: 'reviewed' });
+                    console.log('Report marked as reviewed');
+                    
+                    setConfirmAction(null);
+                    setSelectedReport(null);
+                    alert(`Action completed: ${action === 'ban' ? 'User banned' : 'Warning sent'} successfully!`);
+                } catch (error: any) {
+                    console.error('Error taking action on user:', error);
+                    console.error('Error details:', error.message, error.code);
+                    alert(`Failed to ${action} user: ${error.message || 'Unknown error'}. Check console for details.`);
+                    setConfirmAction(null);
+                }
+            }
+        });
+    };
+
+    const pendingApprovals = users.filter(u => u.status === 'pending');
+    const totalAdsWatched = useMemo(() => users.reduce((acc, user) => acc + (user.adsWatched || 0), 0), [users]);
+    const filteredUsers = users.filter(u => 
+        (u.username?.toLowerCase() || '').includes(searchTerm.toLowerCase()) || 
+        (u.email?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+        (u.admissionNumber?.toLowerCase() || '').includes(searchTerm.toLowerCase())
+    );
+
+    const renderContent = () => {
+        switch (view) {
+            case 'dashboard':
+                return (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                        <StatCard title="Pending Approvals" value={pendingApprovals.length} icon={<Clock className="text-yellow-400" />} />
+                        <StatCard title="Total Users" value={users.length} icon={<Users className="text-blue-400" />} />
+                        <StatCard title="Active Chats" value={chats.length} icon={<MessageSquare className="text-green-400" />} />
+                        <StatCard title="Total Ads Watched" value={totalAdsWatched} icon={<BarChart2 className="text-purple-400" />} />
+                    </div>
+                );
+            case 'approvals':
+                return (
+                    <div className="bg-dark-card rounded-2xl border border-dark-surface overflow-hidden">
+                        <table className="w-full text-left">
+                            <thead className="bg-dark-surface">
+                                <tr>
+                                    <th className="p-4">Username</th>
+                                    <th className="p-4">Email</th>
+                                    <th className="p-4">Admission No.</th>
+                                    <th className="p-4">ID Card</th>
+                                    <th className="p-4">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {pendingApprovals.map(user => (
+                                    <tr key={user.uid} className="border-b border-dark-surface">
+                                        <td className="p-4">{user.username}</td>
+                                        <td className="p-4">{user.email}</td>
+                                        <td className="p-4">{user.admissionNumber}</td>
+                                        <td className="p-4"><a href={user.idCardUrl} target="_blank" rel="noopener noreferrer" className="text-brand-primary hover:underline">View ID</a></td>
+                                        <td className="p-4 flex space-x-2">
+                                            <button onClick={() => handleUserStatusChange(user.uid, 'approved')} className="bg-green-600 hover:bg-green-700 text-white p-2 rounded-lg text-sm flex items-center"><UserCheck size={16} className="mr-1"/> Approve</button>
+                                            <button onClick={() => handleUserStatusChange(user.uid, 'rejected')} className="bg-red-600 hover:bg-red-700 text-white p-2 rounded-lg text-sm flex items-center"><UserX size={16} className="mr-1"/> Reject</button>
+                                        </td>
+                                    </tr>
+                                ))}
+                                 {pendingApprovals.length === 0 && (
+                                    <tr><td colSpan={5} className="text-center p-8 text-dark-text-secondary">No pending approvals.</td></tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                );
+            case 'users':
+                 return (
+                    <div className="bg-dark-card rounded-2xl border border-dark-surface overflow-hidden">
+                         <div className="p-4 bg-dark-surface">
+                            <div className="relative">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-dark-text-secondary" />
+                                <input type="text" placeholder="Search by name, email, or admission number..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full bg-dark-bg p-2 pl-10 rounded-lg border border-dark-surface focus:outline-none focus:ring-2 focus:ring-brand-primary" />
+                            </div>
+                        </div>
+                        <table className="w-full text-left">
+                           <thead className="bg-dark-surface">
+                                <tr>
+                                    <th className="p-4">Username</th>
+                                    <th className="p-4">Email</th>
+                                    <th className="p-4">Status</th>
+                                    <th className="p-4">Warnings</th>
+                                    <th className="p-4">Ads Watched</th>
+                                    <th className="p-4">Actions</th>
+                                </tr>
+                            </thead>
+                             <tbody>
+                                {filteredUsers.map(user => (
+                                    <tr key={user.uid} className="border-b border-dark-surface">
+                                        <td className="p-4">{user.username}</td>
+                                        <td className="p-4">{user.email}</td>
+                                        <td className="p-4"><span className={`px-2 py-1 rounded-full text-xs font-semibold ${user.status === 'approved' ? 'bg-green-500/20 text-green-300' : 'bg-red-500/20 text-red-300'}`}>{user.status}</span></td>
+                                        <td className="p-4">
+                                            {user.warnings ? (
+                                                <span className={`px-2 py-1 rounded-full text-xs font-semibold ${user.warnings === 1 ? 'bg-yellow-500/20 text-yellow-300' : 'bg-orange-500/20 text-orange-300'}`}>
+                                                    <AlertTriangle size={12} className="inline mr-1" />
+                                                    Warning {user.warnings}
+                                                </span>
+                                            ) : (
+                                                <span className="text-dark-text-secondary text-sm">None</span>
+                                            )}
+                                        </td>
+                                        <td className="p-4">{user.adsWatched}</td>
+                                        <td className="p-4">
+                                            {user.status !== 'banned' && (
+                                                <button onClick={() => handleUserStatusChange(user.uid, 'banned')} className="bg-red-600 hover:bg-red-700 text-white p-2 rounded-lg text-sm flex items-center"><UserX size={16} className="mr-1"/> Ban</button>
+                                            )}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                );
+            case 'chats':
+                return (
+                    <div className="flex space-x-4 h-[75vh]">
+                        <div className="w-1/3 bg-dark-card rounded-2xl border border-dark-surface overflow-y-auto">
+                            <h3 className="p-4 font-bold text-lg sticky top-0 bg-dark-card border-b border-dark-surface">Active Chats ({chats.length})</h3>
+                            <ul>
+                                {chats.map(chat => (
+                                    <li key={chat.id} onClick={() => setSelectedChat(chat)} className={`p-4 border-b border-dark-surface cursor-pointer hover:bg-dark-surface ${selectedChat?.id === chat.id ? 'bg-brand-primary/20' : ''}`}>
+                                        <p className="font-semibold">{Object.values(chat.participantInfo).map(p => (p as ChatParticipantInfo).username).join(' & ')}</p>
+                                        <p className="text-xs text-dark-text-secondary">Started: {new Date(chat.createdAt.seconds * 1000).toLocaleString()}</p>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                        <div className="w-2/3 bg-dark-card rounded-2xl border border-dark-surface flex flex-col">
+                            {selectedChat ? (
+                                <>
+                                    <div className="p-4 border-b border-dark-surface flex justify-between items-center">
+                                        <h3 className="font-bold">Chat Transcript</h3>
+                                        <button onClick={() => handleEndChat(selectedChat.id)} className="bg-red-600 hover:bg-red-700 text-white p-2 rounded-lg text-sm">End Chat</button>
+                                    </div>
+                                    <div className="flex-1 p-4 overflow-y-auto space-y-2">
+                                        {chatMessages.map(msg => (
+                                             <div key={msg.id} className="text-sm">
+                                                {/* Fix: Cast participant info to the correct type to avoid 'unknown' type error from Firestore data */}
+                                                <span className="font-bold text-brand-secondary">{(selectedChat.participantInfo[msg.senderId] as ChatParticipantInfo)?.username || 'User'}: </span>
+                                                <span>{msg.content}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </>
+                            ) : (
+                                <div className="flex items-center justify-center h-full text-dark-text-secondary">Select a chat to view messages.</div>
+                            )}
+                        </div>
+                    </div>
+                );
+            case 'reports':
+                return (
+                    <div className="flex space-x-4 h-[75vh]">
+                        <div className="w-1/3 bg-dark-card rounded-2xl border border-dark-surface overflow-y-auto">
+                            <h3 className="p-4 font-bold text-lg sticky top-0 bg-dark-card border-b border-dark-surface flex items-center">
+                                <Flag className="mr-2 text-red-500" />
+                                Reports ({reports.length})
+                            </h3>
+                            <ul>
+                                {reports.map(report => (
+                                    <li 
+                                        key={report.id} 
+                                        onClick={() => setSelectedReport(report)} 
+                                        className={`p-4 border-b border-dark-surface cursor-pointer hover:bg-dark-surface ${selectedReport?.id === report.id ? 'bg-brand-primary/20' : ''}`}
+                                    >
+                                        <div className="flex items-center justify-between mb-2">
+                                            <span className={`text-xs px-2 py-1 rounded-full ${report.status === 'pending' ? 'bg-yellow-500/20 text-yellow-400' : report.status === 'reviewed' ? 'bg-green-500/20 text-green-400' : 'bg-gray-500/20 text-gray-400'}`}>
+                                                {report.status.toUpperCase()}
+                                            </span>
+                                        </div>
+                                        <p className="font-semibold text-sm">{report.reportedUserName}</p>
+                                        <p className="text-xs text-dark-text-secondary">Reported by: {report.reportedByName}</p>
+                                        <p className="text-xs text-red-400 mt-1">{report.reason}</p>
+                                        <p className="text-xs text-dark-text-secondary mt-1">
+                                            {new Date(report.timestamp.seconds * 1000).toLocaleString()}
+                                        </p>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                        <div className="w-2/3 bg-dark-card rounded-2xl border border-dark-surface flex flex-col">
+                            {selectedReport ? (
+                                <>
+                                    <div className="p-4 border-b border-dark-surface">
+                                        <div className="flex justify-between items-start mb-4">
+                                            <div>
+                                                <h3 className="font-bold text-lg flex items-center">
+                                                    <AlertTriangle className="mr-2 text-red-500" />
+                                                    Report Details
+                                                </h3>
+                                                <p className="text-sm text-dark-text-secondary mt-1">Report ID: {selectedReport.id}</p>
+                                            </div>
+                                            {selectedReport.status === 'pending' && (
+                                                <div className="flex space-x-2">
+                                                    <button 
+                                                        onClick={() => handleReportAction(selectedReport.id, 'reviewed')} 
+                                                        className="bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg text-sm flex items-center"
+                                                    >
+                                                        <CheckCircle className="mr-1" size={16} />
+                                                        Mark Reviewed
+                                                    </button>
+                                                    <button 
+                                                        onClick={() => handleReportAction(selectedReport.id, 'dismissed')} 
+                                                        className="bg-gray-600 hover:bg-gray-700 text-white px-3 py-2 rounded-lg text-sm flex items-center"
+                                                    >
+                                                        <XCircle className="mr-1" size={16} />
+                                                        Dismiss
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+                                        
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div className="bg-red-500/10 border border-red-500/30 p-3 rounded-lg">
+                                                <p className="text-xs text-red-400 font-semibold mb-2">REPORTED USER</p>
+                                                <p className="font-semibold text-lg mb-1">{selectedReport.reportedUserName}</p>
+                                                <p className="text-xs text-dark-text-secondary">
+                                                    {selectedReport.participantProfiles[selectedReport.reportedUser]?.email}
+                                                </p>
+                                                <p className="text-xs text-dark-text-secondary mb-3">
+                                                    {selectedReport.participantProfiles[selectedReport.reportedUser]?.admissionNumber}
+                                                </p>
+                                                <div className="flex flex-wrap gap-2 mt-2">
+                                                    <button 
+                                                        onClick={() => handleUserAction(selectedReport.reportedUser, 'warning', selectedReport.id, selectedReport.reportedUserName)}
+                                                        className="bg-yellow-600 hover:bg-yellow-700 text-white px-3 py-1.5 rounded-md text-xs font-medium transition-colors flex items-center"
+                                                    >
+                                                        <AlertTriangle className="mr-1" size={14} />
+                                                        Warn
+                                                    </button>
+                                                    <button 
+                                                        onClick={() => handleUserAction(selectedReport.reportedUser, 'ban', selectedReport.id, selectedReport.reportedUserName)}
+                                                        className="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-md text-xs font-medium transition-colors flex items-center"
+                                                    >
+                                                        <UserX className="mr-1" size={14} />
+                                                        Ban
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div className="bg-dark-surface p-3 rounded-lg border border-dark-surface">
+                                                <p className="text-xs text-dark-text-secondary font-semibold mb-2">REPORTER</p>
+                                                <p className="font-semibold text-lg mb-1">{selectedReport.reportedByName}</p>
+                                                <p className="text-xs text-dark-text-secondary">
+                                                    {selectedReport.participantProfiles[selectedReport.reportedBy]?.email}
+                                                </p>
+                                                <p className="text-xs text-dark-text-secondary mb-3">
+                                                    {selectedReport.participantProfiles[selectedReport.reportedBy]?.admissionNumber}
+                                                </p>
+                                                <div className="flex flex-wrap gap-2 mt-2">
+                                                    <button 
+                                                        onClick={() => handleUserAction(selectedReport.reportedBy, 'warning', selectedReport.id, selectedReport.reportedByName)}
+                                                        className="bg-yellow-600 hover:bg-yellow-700 text-white px-3 py-1.5 rounded-md text-xs font-medium transition-colors flex items-center"
+                                                        title="Warn for false report"
+                                                    >
+                                                        <AlertTriangle className="mr-1" size={14} />
+                                                        Warn
+                                                    </button>
+                                                    <button 
+                                                        onClick={() => handleUserAction(selectedReport.reportedBy, 'ban', selectedReport.id, selectedReport.reportedByName)}
+                                                        className="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-md text-xs font-medium transition-colors flex items-center"
+                                                        title="Ban for false report"
+                                                    >
+                                                        <UserX className="mr-1" size={14} />
+                                                        Ban
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        
+                                        <div className="mt-3 bg-red-500/10 border border-red-500/30 p-3 rounded-lg">
+                                            <p className="text-xs text-dark-text-secondary">Reason</p>
+                                            <p className="text-red-400 font-semibold">{selectedReport.reason}</p>
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="flex-1 overflow-y-auto p-4">
+                                        <h4 className="font-bold mb-3 flex items-center">
+                                            <MessageSquare className="mr-2" size={18} />
+                                            Chat Transcript ({selectedReport.messages.length} messages)
+                                        </h4>
+                                        <div className="space-y-3">
+                                            {selectedReport.messages.map(msg => {
+                                                const senderName = selectedReport.participantProfiles[msg.senderId]?.username || 'Unknown';
+                                                const isReportedUser = msg.senderId === selectedReport.reportedUser;
+                                                return (
+                                                    <div key={msg.id} className={`p-3 rounded-lg ${isReportedUser ? 'bg-red-500/10 border border-red-500/30' : 'bg-dark-surface'}`}>
+                                                        <div className="flex items-center justify-between mb-1">
+                                                            <span className={`font-bold text-sm ${isReportedUser ? 'text-red-400' : 'text-brand-secondary'}`}>
+                                                                {senderName}
+                                                                {isReportedUser && <span className="ml-2 text-xs bg-red-600 px-2 py-0.5 rounded">Reported</span>}
+                                                            </span>
+                                                            <span className="text-xs text-dark-text-secondary">
+                                                                {new Date(msg.timestamp.seconds * 1000).toLocaleTimeString()}
+                                                            </span>
+                                                        </div>
+                                                        {msg.type === 'gif' ? (
+                                                            <img src={msg.content} alt="GIF" className="rounded max-h-32 mt-1" />
+                                                        ) : (
+                                                            <p className="text-sm">{msg.content}</p>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                </>
+                            ) : (
+                                <div className="flex items-center justify-center h-full text-dark-text-secondary">
+                                    Select a report to view details
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                );
+        }
+    };
+    
+    // Show loading while auth is loading
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center h-screen bg-dark-bg">
+                <div className="text-center">
+                    <div className="w-16 h-16 border-4 border-dashed rounded-full animate-spin border-brand-primary mx-auto mb-4"></div>
+                    <p className="text-dark-text-secondary">Loading admin panel...</p>
+                </div>
+            </div>
+        );
+    }
+    
+    // Don't render admin panel if not admin
+    if (!userProfile || !userProfile.isAdmin) {
+        return (
+            <div className="flex items-center justify-center h-screen bg-dark-bg">
+                <div className="text-center">
+                    <Shield size={64} className="text-red-500 mx-auto mb-4" />
+                    <h1 className="text-2xl font-bold text-white mb-2">Access Denied</h1>
+                    <p className="text-dark-text-secondary">You don't have permission to access the admin panel.</p>
+                    <button 
+                        onClick={() => navigate('/chat')}
+                        className="mt-4 bg-brand-primary hover:bg-brand-secondary text-white px-6 py-2 rounded-lg"
+                    >
+                        Go to Chat
+                    </button>
+                </div>
+            </div>
+        );
+    }
+    
+    return (
+        <div className="flex h-screen bg-dark-bg">
+            <nav className="w-64 bg-dark-card p-4 flex flex-col border-r border-dark-surface">
+                <div className="flex items-center space-x-2 mb-8 p-2">
+                    <Shield size={32} className="text-brand-primary" />
+                    <h1 className="text-2xl font-bold">Admin Panel</h1>
+                </div>
+                <ul className="space-y-2">
+                    {(['dashboard', 'approvals', 'users', 'chats', 'reports'] as AdminView[]).map(v => (
+                        <li key={v}>
+                            <button onClick={() => setView(v)} className={`w-full text-left flex items-center space-x-3 p-3 rounded-lg transition-colors ${view === v ? 'bg-brand-primary/20 text-brand-primary' : 'hover:bg-dark-surface'}`}>
+                                {v === 'dashboard' && <BarChart2 />}
+                                {v === 'approvals' && <UserCheck />}
+                                {v === 'users' && <Users />}
+                                {v === 'chats' && <MessageSquare />}
+                                {v === 'reports' && <Flag />}
+                                <span className="capitalize">{v}</span>
+                                {v === 'reports' && reports.filter(r => r.status === 'pending').length > 0 && (
+                                    <span className="ml-auto bg-red-600 text-white text-xs px-2 py-0.5 rounded-full">
+                                        {reports.filter(r => r.status === 'pending').length}
+                                    </span>
+                                )}
+                            </button>
+                        </li>
+                    ))}
+                </ul>
+                 <div className="mt-auto">
+                    <div className="p-2 border-t border-dark-surface">
+                        <p className="text-sm font-semibold">{userProfile?.username}</p>
+                        <p className="text-xs text-dark-text-secondary">{userProfile?.email}</p>
+                    </div>
+                    <button onClick={() => navigate('/profile')} className="w-full text-left flex items-center space-x-3 p-3 rounded-lg transition-colors hover:bg-dark-surface">
+                        {userProfile?.avatarUrl ? (
+                            <img 
+                                src={userProfile.avatarUrl} 
+                                alt="Profile" 
+                                className="w-6 h-6 rounded-full object-cover"
+                            />
+                        ) : (
+                            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-bold ${
+                                userProfile ? ['bg-red-500', 'bg-blue-500', 'bg-green-500', 'bg-yellow-500', 'bg-purple-500', 'bg-pink-500', 'bg-indigo-500', 'bg-teal-500'][
+                                    userProfile.uid.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % 8
+                                ] : 'bg-gray-500'
+                            }`}>
+                                {userProfile?.username?.slice(0, 2).toUpperCase() || 'U'}
+                            </div>
+                        )}
+                        <span>Profile</span>
+                    </button>
+                    <button onClick={() => signOut(auth)} className="w-full text-left flex items-center space-x-3 p-3 rounded-lg transition-colors hover:bg-dark-surface">
+                        <LogOut />
+                        <span>Log Out</span>
+                    </button>
+                </div>
+            </nav>
+            <main className="flex-1 p-8 overflow-y-auto">
+                {renderContent()}
+            </main>
+            {confirmAction && (
+                <ConfirmationModal
+                    title={confirmAction.title}
+                    message={confirmAction.message}
+                    confirmText={confirmAction.confirmText}
+                    isDangerous={confirmAction.isDangerous}
+                    onConfirm={confirmAction.onConfirm}
+                    onCancel={() => setConfirmAction(null)}
+                />
+            )}
+        </div>
+    );
+};
+
+export default AdminPage;

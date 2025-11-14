@@ -1,0 +1,5 @@
+{
+  "name": "LynZo - Exclusive University Chat",
+  "description": "A modern, secure, and exclusive web-chat application for university students. It features one-on-one random chats, an admin approval system for signups, and optional gender-based matchmaking unlocked by watching rewarded ads.",
+  "requestFramePermissions": []
+}

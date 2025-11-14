@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Google IMA SDK Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #fff;
+        }
+        .status {
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 8px;
+            font-weight: bold;
+        }
+        .success { background: #10b981; }
+        .error { background: #ef4444; }
+        .warning { background: #f59e0b; }
+        .info { background: #3b82f6; }
+        button {
+            padding: 12px 24px;
+            margin: 10px 5px;
+            font-size: 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            background: #8b5cf6;
+            color: white;
+            font-weight: bold;
+        }
+        button:hover {
+            background: #7c3aed;
+        }
+        #adContainer {
+            width: 640px;
+            height: 480px;
+            margin: 20px auto;
+            background: #000;
+            position: relative;
+        }
+        #videoElement {
+            width: 100%;
+            height: 100%;
+        }
+        pre {
+            background: #2d2d2d;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎬 Google IMA SDK Test</h1>
+    <p>This page tests if Google IMA SDK can load and play ads.</p>
+
+    <div id="status"></div>
+
+    <button onclick="testIMASDK()">1. Test IMA SDK Loading</button>
+    <button onclick="testAdRequest()">2. Test Ad Request</button>
+    <button onclick="playAd()">3. Play Test Ad</button>
+    <button onclick="clearLogs()">Clear Logs</button>
+
+    <div id="adContainer">
+        <video id="videoElement"></video>
+    </div>
+
+    <h3>Console Logs:</h3>
+    <pre id="logs"></pre>
+
+    <!-- Google IMA SDK -->
+    <script src="https://imasdk.googleapis.com/js/sdkloader/ima3.js"></script>
+
+    <script>
+        let logText = '';
+        const statusDiv = document.getElementById('status');
+        const logsDiv = document.getElementById('logs');
+
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const logMessage = `[${timestamp}] ${message}`;
+            logText += logMessage + '\n';
+            logsDiv.textContent = logText;
+            console.log(message);
+            
+            if (type === 'status') {
+                statusDiv.innerHTML = `<div class="${type}">${message}</div>`;
+            }
+        }
+
+        function clearLogs() {
+            logText = '';
+            logsDiv.textContent = '';
+            statusDiv.innerHTML = '';
+        }
+
+        function testIMASDK() {
+            log('=== Testing IMA SDK ===');
+            
+            if (typeof window.google === 'undefined') {
+                log('❌ window.google is undefined', 'error');
+                statusDiv.innerHTML = '<div class="error">❌ Google namespace not found - SDK not loaded</div>';
+                return false;
+            }
+            log('✅ window.google exists');
+
+            if (typeof window.google.ima === 'undefined') {
+                log('❌ window.google.ima is undefined', 'error');
+                statusDiv.innerHTML = '<div class="error">❌ IMA namespace not found - SDK not loaded</div>';
+                return false;
+            }
+            log('✅ window.google.ima exists');
+
+            try {
+                log('IMA SDK Version: ' + window.google.ima.VERSION);
+                log('✅ IMA SDK loaded successfully!');
+                statusDiv.innerHTML = '<div class="success">✅ IMA SDK Loaded Successfully! Version: ' + window.google.ima.VERSION + '</div>';
+                return true;
+            } catch (e) {
+                log('❌ Error accessing IMA SDK: ' + e.message, 'error');
+                statusDiv.innerHTML = '<div class="error">❌ Error accessing IMA SDK</div>';
+                return false;
+            }
+        }
+
+        function testAdRequest() {
+            log('=== Testing Ad Request ===');
+            
+            const adTagUrl = 'https://pubads.g.doubleclick.net/gampad/ads?iu=/21775744923/external/single_ad_samples&sz=640x480&cust_params=sample_ct%3Dlinear&ciu_szs=300x250%2C728x90&gdfp_req=1&output=vast&unviewed_position_start=1&env=vp&impl=s&correlator=';
+            
+            fetch(adTagUrl)
+                .then(response => {
+                    log('✅ Ad server responded with status: ' + response.status);
+                    return response.text();
+                })
+                .then(data => {
+                    log('Response length: ' + data.length + ' characters');
+                    
+                    if (data.includes('<VAST')) {
+                        log('✅ Valid VAST XML response received');
+                        statusDiv.innerHTML = '<div class="success">✅ Ad Request Successful!</div>';
+                    } else {
+                        log('⚠️ Response does not look like VAST XML', 'warning');
+                        statusDiv.innerHTML = '<div class="warning">⚠️ Unexpected response format</div>';
+                    }
+                })
+                .catch(error => {
+                    log('❌ Ad request failed: ' + error.message, 'error');
+                    statusDiv.innerHTML = '<div class="error">❌ Ad Request Failed: ' + error.message + '</div>';
+                });
+        }
+
+        let adsManager;
+        let adDisplayContainer;
+        let adsLoader;
+
+        function playAd() {
+            log('=== Playing Test Ad ===');
+            
+            if (!testIMASDK()) {
+                log('❌ Cannot play ad - SDK not loaded');
+                return;
+            }
+
+            try {
+                const videoElement = document.getElementById('videoElement');
+                const adContainer = document.getElementById('adContainer');
+                
+                log('Creating AdDisplayContainer...');
+                adDisplayContainer = new google.ima.AdDisplayContainer(adContainer, videoElement);
+                
+                log('Creating AdsLoader...');
+                adsLoader = new google.ima.AdsLoader(adDisplayContainer);
+                
+                log('Adding event listeners...');
+                adsLoader.addEventListener(
+                    google.ima.AdsManagerLoadedEvent.Type.ADS_MANAGER_LOADED,
+                    onAdsManagerLoaded,
+                    false
+                );
+                adsLoader.addEventListener(
+                    google.ima.AdErrorEvent.Type.AD_ERROR,
+                    onAdError,
+                    false
+                );
+                
+                log('Creating AdsRequest...');
+                const adsRequest = new google.ima.AdsRequest();
+                adsRequest.adTagUrl = 'https://pubads.g.doubleclick.net/gampad/ads?iu=/21775744923/external/single_ad_samples&sz=640x480&cust_params=sample_ct%3Dlinear&ciu_szs=300x250%2C728x90&gdfp_req=1&output=vast&unviewed_position_start=1&env=vp&impl=s&correlator=';
+                adsRequest.linearAdSlotWidth = 640;
+                adsRequest.linearAdSlotHeight = 480;
+                
+                log('Requesting ads...');
+                adsLoader.requestAds(adsRequest);
+                
+                statusDiv.innerHTML = '<div class="info">⏳ Requesting ad from Google...</div>';
+                
+            } catch (e) {
+                log('❌ Error playing ad: ' + e.message, 'error');
+                statusDiv.innerHTML = '<div class="error">❌ Error: ' + e.message + '</div>';
+            }
+        }
+
+        function onAdsManagerLoaded(adsManagerLoadedEvent) {
+            log('✅ Ads manager loaded!');
+            
+            try {
+                const adsRenderingSettings = new google.ima.AdsRenderingSettings();
+                adsRenderingSettings.restoreCustomPlaybackStateOnAdBreakComplete = true;
+                
+                adsManager = adsManagerLoadedEvent.getAdsManager(
+                    document.getElementById('videoElement'),
+                    adsRenderingSettings
+                );
+                
+                adsManager.addEventListener(google.ima.AdErrorEvent.Type.AD_ERROR, onAdError);
+                adsManager.addEventListener(google.ima.AdEvent.Type.CONTENT_PAUSE_REQUESTED, () => {
+                    log('⏸️ Content pause requested');
+                });
+                adsManager.addEventListener(google.ima.AdEvent.Type.CONTENT_RESUME_REQUESTED, () => {
+                    log('▶️ Content resume requested');
+                });
+                adsManager.addEventListener(google.ima.AdEvent.Type.ALL_ADS_COMPLETED, () => {
+                    log('✅ All ads completed!');
+                    statusDiv.innerHTML = '<div class="success">✅ Ad Completed Successfully!</div>';
+                });
+                adsManager.addEventListener(google.ima.AdEvent.Type.LOADED, () => {
+                    log('✅ Ad loaded!');
+                });
+                adsManager.addEventListener(google.ima.AdEvent.Type.STARTED, (event) => {
+                    log('✅ Ad started playing!');
+                    const ad = event.getAd();
+                    log('Ad duration: ' + ad.getDuration() + ' seconds');
+                    statusDiv.innerHTML = '<div class="success">✅ Ad Playing!</div>';
+                });
+                
+                adDisplayContainer.initialize();
+                
+                log('Initializing ads manager...');
+                adsManager.init(640, 480, google.ima.ViewMode.NORMAL);
+                
+                log('Starting ad playback...');
+                adsManager.start();
+                
+            } catch (adError) {
+                log('❌ Error in ads manager: ' + adError.message, 'error');
+                statusDiv.innerHTML = '<div class="error">❌ Error: ' + adError.message + '</div>';
+            }
+        }
+
+        function onAdError(adErrorEvent) {
+            log('❌ Ad error occurred', 'error');
+            try {
+                const error = adErrorEvent.getError();
+                log('Error code: ' + error.getErrorCode());
+                log('Error message: ' + error.getMessage());
+                log('Error type: ' + error.getType());
+                statusDiv.innerHTML = '<div class="error">❌ Ad Error: ' + error.getMessage() + '</div>';
+            } catch (e) {
+                log('❌ Could not get error details: ' + e.message);
+                statusDiv.innerHTML = '<div class="error">❌ Ad Error (unknown)</div>';
+            }
+            
+            if (adsManager) {
+                adsManager.destroy();
+            }
+        }
+
+        // Auto-test on load
+        window.addEventListener('load', () => {
+            log('Page loaded, waiting for IMA SDK...');
+            
+            setTimeout(() => {
+                testIMASDK();
+            }, 1000);
+        });
+    </script>
+</body>
+</html>

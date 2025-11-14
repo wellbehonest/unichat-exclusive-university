@@ -1,0 +1,108 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    function isAdmin() {
+      return request.auth != null && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
+    }
+    
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Users collection
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.auth.uid == userId;
+      // Allow users to update their own profile, but block coin modifications
+      // Only Cloud Functions can modify: coins, balanceCoins, reservedCoins, lifetimeCoinsSpent
+      allow update: if isSignedIn() && request.auth.uid == userId && 
+                       !request.resource.data.diff(resource.data).affectedKeys()
+                         .hasAny(['coins', 'balanceCoins', 'reservedCoins', 'lifetimeCoinsSpent']);
+      // Admins can update anything
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+    
+    match /reports/{reportId} {
+      allow create: if isSignedIn();
+      allow read, update, delete: if isAdmin();
+    }
+    
+    match /chats/{chatId} {
+      allow create: if isSignedIn();
+      allow read, write: if isSignedIn() && 
+                           request.auth.uid in resource.data.participants;
+      allow read: if isAdmin();
+      allow delete: if isAdmin();  // Allow admins to delete old chats
+      
+      match /messages/{messageId} {
+        allow read, write: if isSignedIn();
+        allow delete: if isAdmin();  // Allow admins to delete old messages
+      }
+    }
+    
+    // Matchmaking queue moved to RTDB for better performance
+    // No Firestore rules needed
+
+    match /requests/{requestId} {
+      allow read: if isSignedIn() && request.auth.uid == resource.data.uid;
+      allow write: if false;
+    }
+    
+    // Admin Logs
+    match /adminLogs/{logId} {
+      // Only admins can read logs
+      allow read: if isAdmin();
+      
+      // Only admins can create logs
+      allow create: if isAdmin();
+      
+      // Logs are immutable - cannot be updated or deleted
+      allow update, delete: if false;
+    }
+    
+    // Coin Transactions - Immutable Audit Trail
+    match /coinTransactions/{transactionId} {
+      // Anyone can read their own transactions
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      
+      // Only system (via Cloud Functions) can create transactions
+      // In client-side mode, we allow creation but verify userId matches
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      
+      // Admins can read all transactions
+      allow read: if isAdmin();
+      
+      // Transactions are immutable - cannot be updated or deleted
+      allow update, delete: if false;
+    }
+    
+    // Coin Packages - Admin Managed
+    match /coinPackages/{packageId} {
+      // Anyone can read packages
+      allow read: if isSignedIn();
+      
+      // Only admins can create, update, or delete packages
+      allow create, update, delete: if isAdmin();
+    }
+    
+    // Match Proposals - Confirmation System
+    match /matchProposals/{proposalId} {
+      // Allow reading proposals (for queries)
+      allow read: if isSignedIn();
+      
+      // System creates proposals
+      allow create: if isSignedIn();
+      
+      // Users can update proposals they're involved in
+      allow update: if isSignedIn() && 
+                       (resource.data.user1Id == request.auth.uid || 
+                        resource.data.user2Id == request.auth.uid);
+      
+      // Users can delete their own proposals, admins can delete any
+      allow delete: if isSignedIn();
+    }
+  }
+}

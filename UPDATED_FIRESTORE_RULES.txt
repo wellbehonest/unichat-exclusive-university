@@ -1,0 +1,100 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    function isAdmin() {
+      return request.auth != null && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
+    }
+    
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    // Users collection
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.auth.uid == userId;
+      
+      // Allow user to update their own profile (except coins - coins can only decrease)
+      allow update: if isSignedIn() && 
+                       request.auth.uid == userId &&
+                       // Prevent coin manipulation - coins can only stay same or decrease
+                       (request.resource.data.coins <= resource.data.coins);
+      
+      // Allow matchmaking updates (currentChatId + adsWatched) from other users
+      allow update: if isSignedIn() && 
+                       request.resource.data.diff(resource.data).affectedKeys()
+                       .hasOnly(['currentChatId', 'adsWatched']);
+      
+      // Allow admin to update any field (including adding coins)
+      allow update: if isAdmin();
+      
+      allow delete: if isAdmin();
+    }
+    
+    match /reports/{reportId} {
+      allow create: if isSignedIn();
+      allow read, update, delete: if isAdmin();
+    }
+    
+    match /chats/{chatId} {
+      allow create: if isSignedIn();
+      allow read, write: if isSignedIn() && 
+                           request.auth.uid in resource.data.participants;
+      allow read: if isAdmin();
+      allow delete: if isAdmin();  // Allow admins to delete old chats
+      
+      match /messages/{messageId} {
+        allow read, write: if isSignedIn();
+        allow delete: if isAdmin();  // Allow admins to delete old messages
+      }
+    }
+    
+    match /matchmakingQueue/{userId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+      allow delete: if isSignedIn();
+    }
+    
+    // ⭐⭐⭐ ADD THIS SECTION - Admin Logs ⭐⭐⭐
+    match /adminLogs/{logId} {
+      // Only admins can read logs
+      allow read: if isAdmin();
+      
+      // Only admins can create logs
+      allow create: if isAdmin();
+      
+      // Logs are immutable - cannot be updated or deleted
+      allow update, delete: if false;
+    }
+    // ⭐⭐⭐ END OF NEW SECTION ⭐⭐⭐
+    
+    // ⭐⭐⭐ Coin Transactions - Immutable Audit Trail ⭐⭐⭐
+    match /coinTransactions/{transactionId} {
+      // Anyone can read their own transactions
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      
+      // Only system (via Cloud Functions) can create transactions
+      // In client-side mode, we allow creation but verify userId matches
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      
+      // Admins can read all transactions
+      allow read: if isAdmin();
+      
+      // Transactions are immutable - cannot be updated or deleted
+      allow update, delete: if false;
+    }
+    // ⭐⭐⭐ END OF COIN TRANSACTIONS ⭐⭐⭐
+    
+    // ⭐⭐⭐ Coin Packages - Admin Managed ⭐⭐⭐
+    match /coinPackages/{packageId} {
+      // Anyone can read enabled packages
+      allow read: if isSignedIn();
+      
+      // Only admins can create, update, or delete packages
+      allow create, update, delete: if isAdmin();
+    }
+    // ⭐⭐⭐ END OF COIN PACKAGES ⭐⭐⭐
+  }
+}

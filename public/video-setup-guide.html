@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generate Test Ad Video</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #fff;
+        }
+        .container {
+            background: #2a2a2a;
+            padding: 30px;
+            border-radius: 10px;
+        }
+        h1 { color: #4ade80; }
+        .instructions {
+            background: #333;
+            padding: 20px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .code {
+            background: #000;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            overflow-x: auto;
+            margin: 10px 0;
+        }
+        .warning {
+            background: #fef3c7;
+            color: #92400e;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        a {
+            color: #4ade80;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+        button {
+            background: #4ade80;
+            color: #000;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            margin: 10px 5px;
+        }
+        button:hover {
+            background: #22c55e;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎬 Test Ad Video Setup</h1>
+        
+        <div class="warning">
+            ⚠️ <strong>Important:</strong> You need to add a video file named <code>ad-video.mp4</code> to the <code>public</code> folder for the ad system to work.
+        </div>
+
+        <div class="instructions">
+            <h2>Quick Options:</h2>
+            
+            <h3>Option 1: Download a Free Sample Video</h3>
+            <p>Click one of these links to download a free test video:</p>
+            <ul>
+                <li><a href="https://sample-videos.com/video123/mp4/720/big_buck_bunny_720p_1mb.mp4" target="_blank">Big Buck Bunny (1MB)</a></li>
+                <li><a href="https://www.pexels.com/videos/" target="_blank">Pexels Free Videos</a></li>
+                <li><a href="https://pixabay.com/videos/" target="_blank">Pixabay Free Videos</a></li>
+            </ul>
+            <p>After downloading, rename it to <code>ad-video.mp4</code> and place it in the <code>public</code> folder.</p>
+
+            <h3>Option 2: Create Test Video with FFmpeg (macOS/Linux)</h3>
+            <p>If you have FFmpeg installed, run this command in your terminal:</p>
+            <div class="code">
+cd /Users/adarshverma/Downloads/unichat---exclusive-university-chat/public
+ffmpeg -f lavfi -i color=c=black:s=1280x720:d=30 -vf "drawtext=text='Test Ad - Please Wait 30 Seconds':fontcolor=white:fontsize=48:x=(w-text_w)/2:y=(h-text_h)/2" -c:v libx264 -t 30 ad-video.mp4
+            </div>
+            <p><em>Don't have FFmpeg? Install it with:</em> <code>brew install ffmpeg</code></p>
+
+            <h3>Option 3: Use Any MP4 Video</h3>
+            <p>You can use any MP4 video file you have:</p>
+            <ol>
+                <li>Find any MP4 video on your computer</li>
+                <li>Copy it to the <code>public</code> folder</li>
+                <li>Rename it to <code>ad-video.mp4</code></li>
+            </ol>
+        </div>
+
+        <div class="instructions">
+            <h2>How It Works:</h2>
+            <ol>
+                <li>User selects "Male" or "Female" gender filter</li>
+                <li>System shows "Watch Ad to Unlock" button</li>
+                <li>User clicks button → Video modal opens</li>
+                <li>Video auto-plays (no skip, pause, or seek)</li>
+                <li>Progress bar shows completion percentage</li>
+                <li>After video ends → 1 credit automatically granted</li>
+                <li>User can close modal and use gender filter</li>
+                <li>When matching → 1 credit is deducted</li>
+            </ol>
+        </div>
+
+        <div class="instructions">
+            <h2>Testing Checklist:</h2>
+            <ul>
+                <li>✅ Video file at <code>public/ad-video.mp4</code></li>
+                <li>✅ Video auto-plays when clicked</li>
+                <li>✅ Cannot skip/pause/seek</li>
+                <li>✅ Progress bar updates</li>
+                <li>✅ Credit granted after completion</li>
+                <li>✅ Credit deducted on match</li>
+            </ul>
+        </div>
+
+        <div class="warning">
+            <strong>Note:</strong> This is a temporary test setup. When you're ready for production, you'll integrate Google IMA SDK with real video ads from ad networks (AdSense, Ad Manager, etc.) that will pay you for impressions.
+        </div>
+
+        <center>
+            <button onclick="window.open('https://sample-videos.com/video123/mp4/720/big_buck_bunny_720p_1mb.mp4', '_blank')">
+                📥 Download Sample Video
+            </button>
+            <button onclick="alert('Open Terminal and navigate to the public folder, then run the ffmpeg command shown above.')">
+                🛠️ Show FFmpeg Command
+            </button>
+        </center>
+    </div>
+
+    <script>
+        // Check if video exists
+        fetch('/ad-video.mp4', { method: 'HEAD' })
+            .then(response => {
+                if (response.ok) {
+                    const warning = document.querySelector('.warning');
+                    warning.style.background = '#d1fae5';
+                    warning.style.color = '#065f46';
+                    warning.innerHTML = '✅ <strong>Success!</strong> Video file detected at <code>public/ad-video.mp4</code>. You\'re all set!';
+                }
+            })
+            .catch(() => {
+                // File doesn't exist - warning already shows
+            });
+    </script>
+</body>
+</html>
